@@ -198,10 +198,10 @@ def find_by_barcode(barcode):
 
     try:
         result = fetch_product(url)
-    except (requests.RequestException, ValueError):
+    except Exception:
         return jsonify({
             "error": "Could not fetch product from OpenFoodFacts"
-        }), 502
+        }), 500
 
     if result.get("status") != 1:
         return jsonify({
@@ -239,10 +239,10 @@ def search_product():
                 "page_size": 5
             }
         )
-    except (requests.RequestException, ValueError):
+    except Exception:
         return jsonify({
             "error": "Could not search OpenFoodFacts"
-        }), 502
+        }), 500
 
     products = []
 
@@ -266,10 +266,10 @@ def import_product(barcode):
 
     try:
         result = fetch_product(url)
-    except (requests.RequestException, ValueError):
+    except Exception:
         return jsonify({
             "error": "Could not fetch product from OpenFoodFacts"
-        }), 502
+        }), 500
 
     if result.get("status") != 1:
         return jsonify({
