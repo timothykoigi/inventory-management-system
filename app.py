@@ -22,6 +22,10 @@ inventory = [
     }
 ]
 
+OPENFOODFACTS_HEADERS = {
+    "User-Agent": "InventoryManagementSystem/1.0"
+}
+
 
 def find_item(item_id):
     for item in inventory:
@@ -31,22 +35,80 @@ def find_item(item_id):
 
 
 def next_id():
-    return max([item["id"] for item in inventory], default=0) + 1
+    return max(
+        [item["id"] for item in inventory],
+        default=0
+    ) + 1
 
 
 def fetch_product(url, params=None):
     response = requests.get(
         url,
         params=params,
+        headers=OPENFOODFACTS_HEADERS,
         timeout=10
     )
     response.raise_for_status()
     return response.json()
 
 
+def validate_item_data(data, partial=False):
+    if not isinstance(data, dict):
+        return "Valid JSON object is required"
+
+    if not partial and "name" not in data:
+        return "Name is required"
+
+    if not partial and "price" not in data:
+        return "Price is required"
+
+    if not partial and "quantity" not in data:
+        return "Quantity is required"
+
+    allowed_fields = {
+        "name",
+        "price",
+        "quantity",
+        "barcode",
+        "brand"
+    }
+
+    for field in data:
+        if field not in allowed_fields:
+            return f"Invalid field: {field}"
+
+    if "name" in data:
+        if not isinstance(data["name"], str) or not data["name"].strip():
+            return "Invalid name"
+
+    if "price" in data:
+        if (
+            isinstance(data["price"], bool)
+            or not isinstance(data["price"], (int, float))
+            or data["price"] < 0
+        ):
+            return "Invalid price"
+
+    if "quantity" in data:
+        if (
+            isinstance(data["quantity"], bool)
+            or not isinstance(data["quantity"], int)
+            or data["quantity"] < 0
+        ):
+            return "Invalid quantity"
+
+    for field in ["barcode", "brand"]:
+        if field in data and not isinstance(data[field], str):
+            return f"Invalid {field}"
+
+    return None
+
+
 @app.route("/")
 def home():
-    return jsonify({"message": "Welcome to the Inventory Management API"})
+    return jsonify({
+        "message": "Welcome to the Inventory Management API"
+    })
 
 
 @app.route("/inventory", methods=["GET"])
@@ -68,82 +130,49 @@ def get_item(item_id):
 def add_item():
     data = request.get_json(silent=True)
 
-    if not isinstance(data, dict):
-        return jsonify({"error": "Valid JSON is required"}), 400
+    error = validate_item_data(data)
 
-    name = data.get("name")
-    price = data.get("price")
-    quantity = data.get("quantity")
-
-    if not isinstance(name, str) or not name.strip():
-        return jsonify({"error": "Name is required"}), 400
-
-    if isinstance(price, bool) or not isinstance(price, (int, float)) or price < 0:
-        return jsonify({"error": "Invalid price"}), 400
-
-    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 0:
-        return jsonify({"error": "Invalid quantity"}), 400
-
-    barcode = data.get("barcode", "")
-    brand = data.get("brand", "")
-
-    if not isinstance(barcode, str) or not isinstance(brand, str):
-        return jsonify({"error": "Barcode and brand must be text"}), 400
+    if error:
+        return jsonify({"error": error}), 400
 
     item = {
         "id": next_id(),
-        "name": name.strip(),
-        "price": price,
-        "quantity": quantity,
-        "barcode": barcode.strip(),
-        "brand": brand.strip()
+        "name": data["name"].strip(),
+        "price": data["price"],
+        "quantity": data["quantity"],
+        "barcode": data.get("barcode", "").strip(),
+        "brand": data.get("brand", "").strip()
     }
 
     inventory.append(item)
+
     return jsonify(item), 201
 
 
 @app.route("/inventory/<int:item_id>", methods=["PATCH"])
 def update_item(item_id):
     item = find_item(item_id)
-    data = request.get_json(silent=True)
 
     if item is None:
         return jsonify({"error": "Item not found"}), 404
 
-    if not isinstance(data, dict) or not data:
-        return jsonify({"error": "Valid update data is required"}), 400
+    data = request.get_json(silent=True)
 
-    allowed = ["name", "price", "quantity", "barcode", "brand"]
+    if not data:
+        return jsonify({
+            "error": "Valid update data is required"
+        }), 400
 
-    if any(field not in allowed for field in data):
-        return jsonify({"error": "Invalid field"}), 400
+    error = validate_item_data(data, partial=True)
 
-    if "name" in data and (
-        not isinstance(data["name"], str) or not data["name"].strip()
-    ):
-        return jsonify({"error": "Invalid name"}), 400
-
-    if "price" in data and (
-        isinstance(data["price"], bool)
-        or not isinstance(data["price"], (int, float))
-        or data["price"] < 0
-    ):
-        return jsonify({"error": "Invalid price"}), 400
-
-    if "quantity" in data and (
-        isinstance(data["quantity"], bool)
-        or not isinstance(data["quantity"], int)
-        or data["quantity"] < 0
-    ):
-        return jsonify({"error": "Invalid quantity"}), 400
-
-    for field in ["barcode", "brand"]:
-        if field in data and not isinstance(data[field], str):
-            return jsonify({"error": f"Invalid {field}"}), 400
+    if error:
+        return jsonify({"error": error}), 400
 
     for field, value in data.items():
-        item[field] = value.strip() if isinstance(value, str) else value
+        if isinstance(value, str):
+            item[field] = value.strip()
+        else:
+            item[field] = value
 
     return jsonify(item), 200
 
@@ -156,20 +185,28 @@ def delete_item(item_id):
         return jsonify({"error": "Item not found"}), 404
 
     inventory.remove(item)
+
     return "", 204
 
 
 @app.route("/external/barcode/<barcode>", methods=["GET"])
 def find_by_barcode(barcode):
-    url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
+    url = (
+        "https://world.openfoodfacts.org/"
+        f"api/v2/product/{barcode}.json"
+    )
 
     try:
         result = fetch_product(url)
     except (requests.RequestException, ValueError):
-        return jsonify({"error": "Could not fetch product"}), 502
+        return jsonify({
+            "error": "Could not fetch product from OpenFoodFacts"
+        }), 502
 
     if result.get("status") != 1:
-        return jsonify({"error": "Product not found"}), 404
+        return jsonify({
+            "error": "Product not found"
+        }), 404
 
     product = result.get("product", {})
 
@@ -187,7 +224,9 @@ def search_product():
     name = request.args.get("name", "").strip()
 
     if not name:
-        return jsonify({"error": "Product name is required"}), 400
+        return jsonify({
+            "error": "Product name is required"
+        }), 400
 
     try:
         result = fetch_product(
@@ -201,7 +240,9 @@ def search_product():
             }
         )
     except (requests.RequestException, ValueError):
-        return jsonify({"error": "Could not search products"}), 502
+        return jsonify({
+            "error": "Could not search OpenFoodFacts"
+        }), 502
 
     products = []
 
@@ -218,21 +259,31 @@ def search_product():
 
 @app.route("/external/import/<barcode>", methods=["POST"])
 def import_product(barcode):
+    url = (
+        "https://world.openfoodfacts.org/"
+        f"api/v2/product/{barcode}.json"
+    )
+
     try:
-        result = fetch_product(
-            f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
-        )
+        result = fetch_product(url)
     except (requests.RequestException, ValueError):
-        return jsonify({"error": "Could not fetch product"}), 502
+        return jsonify({
+            "error": "Could not fetch product from OpenFoodFacts"
+        }), 502
 
     if result.get("status") != 1:
-        return jsonify({"error": "Product not found"}), 404
+        return jsonify({
+            "error": "Product not found"
+        }), 404
 
     product = result.get("product", {})
+
     name = product.get("product_name", "").strip()
 
     if not name:
-        return jsonify({"error": "Product name is missing"}), 422
+        return jsonify({
+            "error": "Product name is missing"
+        }), 422
 
     for item in inventory:
         if item["barcode"] == barcode:
@@ -247,7 +298,7 @@ def import_product(barcode):
         "price": 0,
         "quantity": 0,
         "barcode": barcode,
-        "brand": product.get("brands", "")
+        "brand": product.get("brands", "").strip()
     }
 
     inventory.append(item)
