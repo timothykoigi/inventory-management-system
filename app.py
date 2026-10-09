@@ -6,7 +6,7 @@ app = Flask(__name__)
 inventory = [
     {
         "id": 1,
-        "name": "Organic Almond Milk",
+        "name": " Milk",
         "price": 350.0,
         "quantity": 10,
         "barcode": "3017620422003",
@@ -14,7 +14,7 @@ inventory = [
     },
     {
         "id": 2,
-        "name": "Whole Wheat Bread",
+        "name": "Bread",
         "price": 120.0,
         "quantity": 20,
         "barcode": "",
@@ -246,6 +246,7 @@ def search_product():
 
     products = []
 
+
     for product in result.get("products", []):
         products.append({
             "name": product.get("product_name", ""),
@@ -253,6 +254,7 @@ def search_product():
             "barcode": product.get("code", ""),
             "ingredients": product.get("ingredients_text", "")
         })
+
 
     return jsonify(products)
 
