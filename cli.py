@@ -149,7 +149,7 @@ def delete_item():
         print("Enter a valid item ID.")
 
     except requests.RequestException as error:
-        print(f"Could not connect to API: {error}")
+         print(f"Could not connect to API: {error}")
 
 
 def find_product():
